@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MQENGINE · NVT RAW Z-SCORE</title>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #0b0f14;
+            color: #e8edf2;
+        }
+        .page { max-width: 1850px; margin: 0 auto; padding: 20px; }
+        .header {
+            background: #121923;
+            border: 1px solid #243041;
+            border-radius: 14px;
+            padding: 18px 20px;
+            margin-bottom: 18px;
+        }
+        .title { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
+        .subtitle { color: #9fb0c3; font-size: 14px; }
+        .card {
+            background: #121923;
+            border: 1px solid #243041;
+            border-radius: 14px;
+            padding: 16px;
+            margin-bottom: 18px;
+        }
+        .card-title { font-size: 18px; font-weight: 700; margin-bottom: 12px; }
+        .small-note { color: #95a6b8; font-size: 12px; line-height: 1.45; }
+        .danger-note {
+            background: #2a1818;
+            border: 1px solid #6b3030;
+            color: #ffdede;
+            padding: 10px 12px;
+            border-radius: 10px;
+            font-size: 13px;
+        }
+        .ok-note {
+            background: #14261d;
+            border: 1px solid #2e5a45;
+            color: #d8ffea;
+            padding: 10px 12px;
+            border-radius: 10px;
+            font-size: 13px;
+        }
+        .hidden { display: none !important; }
+        .mode-tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+        .mode-btn {
+            border: 1px solid #2f4159;
+            background: #182230;
+            color: #d9e3ed;
+            padding: 10px 14px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .mode-btn.active {
+            background: #244363;
+            border-color: #4f83b9;
+            color: #ffffff;
+        }
+        .layout-main {
+            display: grid;
+            grid-template-columns: 360px 1fr;
+            gap: 18px;
+            align-items: start;
+        }
+        .filter-panel { position: sticky; top: 14px; }
+        .filter-group {
+            margin-bottom: 16px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid #243041;
+        }
+        .filter-group:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+        .filter-label {
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #c9d7e5;
+        }
+        .checkbox-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 6px 8px;
+        }
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: #c6d0dc;
+        }
+        .checkbox-item input { accent-color: #5d9cec; }
+        .filter-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+        .btn {
+            border: 1px solid #2f4159;
+            background: #182230;
+            color: #d9e3ed;
+            padding: 9px 12px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 13px;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .btn:hover { background: #223144; }
+        .summary-bar {
+            display: grid;
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .metric-box {
+            background: #0f151d;
+            border: 1px solid #273446;
+            border-radius: 12px;
+            padding: 12px;
+            min-height: 88px;
+        }
+        .metric-label { font-size: 12px; color: #8fa2b6; margin-bottom: 6px; }
+        .metric-value {
+            font-size: 21px;
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .chart-box {
+            width: 100%;
+            height: 640px;
+            min-height: 640px;
+        }
+        .chart-box.tall {
+            height: 620px;
+            min-height: 620px;
+        }
+        .sub-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 18px;
+            margin-top: 18px;
+        }
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+        .detail-block {
+            background: #0f151d;
+            border: 1px solid #273446;
+            border-radius: 12px;
+            padding: 12px;
+        }
+        .detail-block pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: #d7e0ea;
+            font-size: 12px;
+            line-height: 1.45;
+        }
+        .table-wrap {
+            max-height: 560px;
+            overflow: auto;
+            border: 1px solid #273446;
+            border-radius: 12px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        th, td {
+            padding: 9px 10px;
+            border-bottom: 1px solid #223041;
+            text-align: left;
+            vertical-align: top;
+            white-space: nowrap;
+        }
+        th {
+            background: #0f151d;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        tr:hover td { background: #162130; }
+        .badge-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+        .badge {
+            font-size: 12px;
+            padding: 5px 8px;
+            border-radius: 999px;
+            background: #192331;
+            border: 1px solid #2e4158;
+            color: #cbd8e5;
+        }
+        .top-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        .detail-section { margin-top: 8px; }
+        .detail-stack { display: grid; gap: 18px; }
+        #errorBox { display: none; white-space: pre-wrap; }
+        select.btn { appearance: none; }
+
+        @media (max-width: 1300px) {
+            .layout-main, .sub-layout, .detail-grid { grid-template-columns: 1fr; }
+            .summary-bar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .filter-panel { position: static; }
+        }
+
+        @media (max-width: 800px) {
+            .summary-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .checkbox-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+<div class="page">
+    <div class="header">
+        <div class="title" id="pageTitle">MQENGINE · NVT RAW Z-SCORE</div>
+        <div class="subtitle" id="pageSubtitle">Loading date range...</div>
+        <div class="badge-row">
+            <div class="badge" id="badgeUniverse">Universe: -</div>
+            <div class="badge" id="badgeMode">Mode: Sharpe Heatmap</div>
+            <div class="badge" id="badgeCurves">Curves: -</div>
+            <div class="badge" id="badgeDataset">Dataset: -</div>
+            <div class="badge" id="badgeView">View: Overview</div>
+        </div>
+    </div>
+
+    <div class="card ok-note" id="statusBox">Booting dashboard...</div>
+    <div class="card danger-note" id="errorBox"></div>
+
+    <div id="overviewView">
+        <div class="card">
+            <div class="card-title">Research Mode</div>
+            <div class="mode-tabs" id="modeTabs"></div>
+            <div class="small-note" id="modeDescription">Loading mode description...</div>
+            <div id="modeChart" class="chart-box"></div>
+        </div>
+
+        <div class="layout-main">
+            <div class="filter-panel">
+                <div class="card">
+                    <div class="card-title">Strategy Filters</div>
+                    <div class="small-note">Click any combined equity curve or strategy row to open the dedicated detail page. Filter state is preserved when you come back.</div>
+
+                    <div class="filter-group">
+                        <div class="filter-label">Rolling Window</div>
+                        <div class="checkbox-grid" id="filter-rolling_window"></div>
+                    </div>
+
+                    <div class="filter-group">
+                        <div class="filter-label">Long Threshold</div>
+                        <div class="checkbox-grid" id="filter-long_threshold"></div>
+                    </div>
+
+                    <div class="filter-group">
+                        <div class="filter-label">Short Threshold</div>
+                        <div class="checkbox-grid" id="filter-short_threshold"></div>
+                    </div>
+
+                    <div class="filter-group">
+                        <div class="filter-label">Exit Signal</div>
+                        <div class="checkbox-grid" id="filter-exit_signal"></div>
+                    </div>
+
+                    <div class="filter-group">
+                        <div class="filter-label">Take Profit</div>
+                        <div class="checkbox-grid" id="filter-take_profit"></div>
+                    </div>
+
+                    <div class="filter-group">
+                        <div class="filter-label">Stop Loss</div>
+                        <div class="checkbox-grid" id="filter-stop_loss"></div>
+                    </div>
+
+                    <div class="filter-group">
+                        <div class="filter-label">Position Size %</div>
+                        <div class="checkbox-grid" id="filter-position_size_pct"></div>
+                    </div>
+
+                    <div class="filter-group">
+                        <div class="filter-label">Ranking Controls</div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                            <div>
+                                <div class="small-note" style="margin-bottom:6px;">Sort By</div>
+                                <select id="sortBy" class="btn" style="width:100%;">
+                                    <option value="sharpe">Sharpe</option>
+                                    <option value="calmar">Calmar</option>
+                                    <option value="return_pct">Return %</option>
+                                    <option value="max_drawdown_asc">Lowest MDD</option>
+                                    <option value="num_trades">Most Trades</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <div class="small-note" style="margin-bottom:6px;">Top N Curves</div>
+                                <select id="topN" class="btn" style="width:100%;">
+                                    <option value="20" selected>Top 20</option>
+                                    <option value="50">Top 50</option>
+                                    <option value="100">Top 100</option>
+                                    <option value="200">Top 200</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="filter-actions">
+                        <button class="btn" id="btnApply">Apply Filter</button>
+                        <button class="btn" id="btnReset">Reset All</button>
+                        <button class="btn" id="btnTop">Open Top Detail</button>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <div class="card">
+                    <div class="card-title">Combined Equity Curves</div>
+                    <div class="small-note">Filtered strategy universe plotted together. Single click on any line opens page 2 for that strategy.</div>
+
+                    <div class="summary-bar">
+                        <div class="metric-box">
+                            <div class="metric-label">Filtered Universe</div>
+                            <div class="metric-value" id="summaryUniverse">-</div>
+                        </div>
+                        <div class="metric-box">
+                            <div class="metric-label">Top Strategy Sharpe</div>
+                            <div class="metric-value" id="summarySharpe">-</div>
+                        </div>
+                        <div class="metric-box">
+                            <div class="metric-label">Top Strategy Return %</div>
+                            <div class="metric-value" id="summaryReturn">-</div>
+                        </div>
+                        <div class="metric-box">
+                            <div class="metric-label">Top Strategy MDD %</div>
+                            <div class="metric-value" id="summaryMDD">-</div>
+                        </div>
+                        <div class="metric-box">
+                            <div class="metric-label">Top Strategy Trades</div>
+                            <div class="metric-value" id="summaryTrades">-</div>
+                        </div>
+                        <div class="metric-box">
+                            <div class="metric-label">Top Strategy Win Rate %</div>
+                            <div class="metric-value" id="summaryWinRate">-</div>
+                        </div>
+                    </div>
+
+                    <div id="equityExplorer" class="chart-box"></div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">Filtered Strategy Table</div>
+                    <div class="small-note">Single click any row to route into the dedicated detail page.</div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                            <tr>
+                                <th>Strategy ID</th>
+                                <th>Sharpe</th>
+                                <th>Calmar</th>
+                                <th>Return %</th>
+                                <th>MDD %</th>
+                                <th>Trades</th>
+                                <th>Win Rate %</th>
+                                <th>PF</th>
+                                <th>Use Range</th>
+                            </tr>
+                            </thead>
+                            <tbody id="strategyTableBody">
+                            <tr>
+                                <td colspan="9">No strategies loaded.</td>
+                            </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="detailView" class="hidden">
+        <div class="top-actions">
+            <div>
+                <div class="card-title" style="margin:0 0 4px 0;" id="detailTitle">Strategy Detail</div>
+                <div class="small-note" id="detailSubtitle">Loading selected strategy...</div>
+            </div>
+            <a href="/" class="btn" id="btnBackOverview">← Back to Overview</a>
+        </div>
+
+        <div class="summary-bar">
+            <div class="metric-box">
+                <div class="metric-label">Sharpe</div>
+                <div class="metric-value" id="detailSharpe">-</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-label">Return %</div>
+                <div class="metric-value" id="detailReturn">-</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-label">Max Drawdown %</div>
+                <div class="metric-value" id="detailMDD">-</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-label">Trades</div>
+                <div class="metric-value" id="detailTrades">-</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-label">Win Rate %</div>
+                <div class="metric-value" id="detailWinRate">-</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-label">Profit Factor</div>
+                <div class="metric-value" id="detailPF">-</div>
+            </div>
+        </div>
+
+        <div class="detail-stack">
+            <div class="card detail-section">
+                <div class="card-title">Equity Curve vs Benchmark</div>
+                <div class="small-note">This chart now uses a real date axis and a right-side legend layout so it stays readable.</div>
+                <div id="detailEquityChart" class="chart-box"></div>
+            </div>
+
+            <div class="card detail-section">
+                <div class="card-title">Price + Signal + Entry / Exit Overlay</div>
+                <div class="small-note">Left axis = price. Right axis = z-score. Green markers = long entry, red markers = short entry, white markers = exit.</div>
+                <div id="detailSignalChart" class="chart-box tall"></div>
+            </div>
+
+            <div class="sub-layout">
+                <div class="card">
+                    <div class="card-title">Params / Metrics</div>
+                    <div class="detail-grid">
+                        <div class="detail-block">
+                            <div class="filter-label">Params</div>
+                            <pre id="detailParams">No strategy selected.</pre>
+                        </div>
+                        <div class="detail-block">
+                            <div class="filter-label">Metrics</div>
+                            <pre id="detailMetrics">No strategy selected.</pre>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">Debug Summary</div>
+                    <div class="detail-block">
+                        <pre id="detailDebug">No strategy selected.</pre>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Trade Log</div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>Entry Date</th>
+                            <th>Exit Date</th>
+                            <th>Side</th>
+                            <th>Entry Px</th>
+                            <th>Exit Px</th>
+                            <th>Bars Held</th>
+                            <th>Pos Size %</th>
+                            <th>Alloc Cap</th>
+                            <th>Units</th>
+                            <th>PnL %</th>
+                            <th>PnL Cash</th>
+                            <th>Entry Z</th>
+                            <th>Exit Z</th>
+                            <th>Exit Reason</th>
+                        </tr>
+                        </thead>
+                        <tbody id="tradeLogBody">
+                        <tr>
+                            <td colspan="14">No trade log loaded.</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const FILTER_STATE_KEY = 'mqengine_nvt_ver2_filter_state_v1';
+const OVERVIEW_SCROLL_KEY = 'mqengine_nvt_ver2_overview_scroll_v1';
+
+const state = {
+    meta: null,
+    filterOptions: null,
+    modes: [],
+    currentMode: null,
+    currentModeData: null,
+    filteredSummaries: [],
+    benchmark: null,
+    view: window.location.pathname.startsWith('/strategy/') ? 'detail' : 'overview',
+    strategyIdFromPath: window.location.pathname.startsWith('/strategy/')
+        ? decodeURIComponent(window.location.pathname.split('/strategy/')[1] || '')
+        : null
+};
+
+function showError(msg) {
+    const box = document.getElementById('errorBox');
+    box.style.display = 'block';
+    box.textContent = msg;
+    console.error(msg);
+}
+
+function setStatus(msg) {
+    document.getElementById('statusBox').textContent = msg;
+}
+
+async function fetchJSON(url, options = {}) {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status} | ${url}\n${text}`);
+    }
+    return await res.json();
+}
+
+function makeDarkLayout(title, extra = {}) {
+    return {
+        title,
+        paper_bgcolor: '#121923',
+        plot_bgcolor: '#121923',
+        font: { color: '#e8edf2' },
+        margin: { t: 80, l: 70, r: 340, b: 60 },
+        legend: {
+            orientation: 'v',
+            yanchor: 'top',
+            y: 1,
+            xanchor: 'left',
+            x: 1.02
+        },
+        hovermode: 'x unified',
+        xaxis: {
+            title: 'Date',
+            type: 'date',
+            automargin: true,
+            gridcolor: '#1e2a39',
+            zerolinecolor: '#1e2a39'
+        },
+        yaxis: {
+            automargin: true,
+            gridcolor: '#1e2a39',
+            zerolinecolor: '#1e2a39'
+        },
+        ...extra
+    };
+}
+
+function safeParseJSON(raw, fallback = null) {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return fallback;
+    }
+}
+
+function saveFilterState() {
+    const payload = {
+        filters: getSelectedFilters(),
+        sortBy: document.getElementById('sortBy')?.value || 'sharpe',
+        topN: document.getElementById('topN')?.value || '20',
+        mode: state.currentMode || 'sharpe',
+        scrollY: window.scrollY || 0
+    };
+    sessionStorage.setItem(FILTER_STATE_KEY, JSON.stringify(payload));
+}
+
+function loadSavedFilterState() {
+    return safeParseJSON(sessionStorage.getItem(FILTER_STATE_KEY), null);
+}
+
+function saveOverviewScroll() {
+    sessionStorage.setItem(OVERVIEW_SCROLL_KEY, String(window.scrollY || 0));
+}
+
+function restoreOverviewScroll() {
+    const raw = sessionStorage.getItem(OVERVIEW_SCROLL_KEY);
+    if (raw !== null) {
+        const y = Number(raw);
+        if (!Number.isNaN(y)) {
+            window.scrollTo({ top: y, behavior: 'auto' });
+        }
+    }
+}
+
+function setViewMode(view) {
+    const overview = document.getElementById('overviewView');
+    const detail = document.getElementById('detailView');
+    if (view === 'detail') {
+        overview.classList.add('hidden');
+        detail.classList.remove('hidden');
+        document.getElementById('badgeView').textContent = 'View: Strategy Detail';
+    } else {
+        detail.classList.add('hidden');
+        overview.classList.remove('hidden');
+        document.getElementById('badgeView').textContent = 'View: Overview';
+    }
+}
+
+function createCheckboxGroup(containerId, values, groupName) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = '';
+    values.forEach(value => {
+        const label = document.createElement('label');
+        label.className = 'checkbox-item';
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = true;
+        cb.dataset.group = groupName;
+        cb.value = String(value);
+
+        const span = document.createElement('span');
+        span.textContent = String(value);
+
+        label.appendChild(cb);
+        label.appendChild(span);
+        container.appendChild(label);
+    });
+}
+
+function getSelectedFilters() {
+    const filters = {};
+    document.querySelectorAll('input[type="checkbox"][data-group]').forEach(cb => {
+        const g = cb.dataset.group;
+        if (!filters[g]) filters[g] = [];
+        if (cb.checked) filters[g].push(cb.value);
+    });
+    return filters;
+}
+
+function resetAllFilters() {
+    document.querySelectorAll('input[type="checkbox"][data-group]').forEach(cb => {
+        cb.checked = true;
+    });
+    document.getElementById('sortBy').value = 'sharpe';
+    document.getElementById('topN').value = '20';
+    saveFilterState();
+}
+
+function applySavedFilters(saved) {
+    if (!saved) return;
+
+    const filters = saved.filters || {};
+    document.querySelectorAll('input[type="checkbox"][data-group]').forEach(cb => {
+        const group = cb.dataset.group;
+        const chosen = filters[group];
+        cb.checked = !chosen ? true : chosen.includes(cb.value);
+    });
+
+    if (saved.sortBy) {
+        document.getElementById('sortBy').value = saved.sortBy;
+    }
+    if (saved.topN) {
+        document.getElementById('topN').value = String(saved.topN);
+    }
+}
+
+function renderHeader(meta) {
+    document.getElementById('pageTitle').textContent = meta.page_title || 'MQENGINE · NVT RAW Z-SCORE';
+    document.getElementById('pageSubtitle').textContent = `${meta.requested_start || '-'} → ${meta.requested_end || '-'}`;
+    document.getElementById('badgeUniverse').textContent = `Universe: ${meta.total_strategies ?? '-'}`;
+    document.getElementById('badgeDataset').textContent = `Dataset: ${meta.dataset_name || 'NVT RAW Z'}`;
+}
+
+function renderModeTabs(modes) {
+    const wrap = document.getElementById('modeTabs');
+    wrap.innerHTML = '';
+    modes.forEach((mode, idx) => {
+        const btn = document.createElement('button');
+        btn.className = 'mode-btn' + (idx === 0 ? ' active' : '');
+        btn.textContent = mode.label;
+        btn.dataset.mode = mode.key;
+        btn.onclick = async () => {
+            document.querySelectorAll('.mode-btn').forEach(x => x.classList.remove('active'));
+            btn.classList.add('active');
+            await loadMode(mode.key);
+            saveFilterState();
+        };
+        wrap.appendChild(btn);
+    });
+}
+
+function markActiveMode(modeKey) {
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === modeKey);
+    });
+}
+
+function renderFilterOptions(filterOptions) {
+    createCheckboxGroup('filter-rolling_window', filterOptions.rolling_window || [], 'rolling_window');
+    createCheckboxGroup('filter-long_threshold', filterOptions.long_threshold || [], 'long_threshold');
+    createCheckboxGroup('filter-short_threshold', filterOptions.short_threshold || [], 'short_threshold');
+    createCheckboxGroup('filter-exit_signal', filterOptions.exit_signal || [], 'exit_signal');
+    createCheckboxGroup('filter-take_profit', filterOptions.take_profit || [], 'take_profit');
+    createCheckboxGroup('filter-stop_loss', filterOptions.stop_loss || [], 'stop_loss');
+    createCheckboxGroup('filter-position_size_pct', filterOptions.position_size_pct || [], 'position_size_pct');
+}
+
+async function loadMode(modeKey) {
+    setStatus(`Loading mode: ${modeKey} ...`);
+    state.currentMode = modeKey;
+    document.getElementById('badgeMode').textContent = `Mode: ${modeKey}`;
+
+    const payload = await fetchJSON(`/api/mode/${encodeURIComponent(modeKey)}`);
+    state.currentModeData = payload;
+    renderModeChart(payload);
+    document.getElementById('modeDescription').textContent = payload.description || '';
+    setStatus(`Mode loaded: ${modeKey}`);
+}
+
+function renderModeChart(payload) {
+    const chart = payload.chart || {};
+    const traces = chart.traces || [];
+    const layout = makeDarkLayout(chart.layout?.title || 'Research Mode', chart.layout || {});
+    Plotly.react('modeChart', traces, layout, { responsive: true, displaylogo: false });
+}
+
+function updateOverviewSummary(topStrategy, payload) {
+    document.getElementById('summaryUniverse').textContent = payload.filtered_count ?? 0;
+    document.getElementById('badgeCurves').textContent = `Curves: ${payload.curve_count ?? 0} / ${payload.filtered_count ?? 0}`;
+
+    const m = topStrategy?.metrics || {};
+    document.getElementById('summarySharpe').textContent = m.sharpe ?? '-';
+    document.getElementById('summaryReturn').textContent = m.return_pct ?? '-';
+    document.getElementById('summaryMDD').textContent = m.max_drawdown ?? '-';
+    document.getElementById('summaryTrades').textContent = m.num_trades ?? '-';
+    document.getElementById('summaryWinRate').textContent = m.win_rate ?? '-';
+}
+
+async function applyFilter() {
+    setStatus('Applying filters ...');
+    saveFilterState();
+
+    const filters = getSelectedFilters();
+    const sortBy = document.getElementById('sortBy').value;
+    const topN = parseInt(document.getElementById('topN').value, 10);
+
+    const payload = await fetchJSON('/api/filter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            mode: state.currentMode,
+            filters,
+            sort_by: sortBy,
+            top_n: topN
+        })
+    });
+
+    state.filteredSummaries = payload.strategies || [];
+    renderStrategyTable(state.filteredSummaries);
+    renderCombinedCurves(payload.curves || []);
+    updateOverviewSummary(payload.top_strategy, payload);
+
+    saveFilterState();
+    setStatus('Filter applied.');
+}
+
+function openStrategyPage(strategyId) {
+    if (!strategyId) return;
+    saveFilterState();
+    saveOverviewScroll();
+    window.location.href = `/strategy/${encodeURIComponent(strategyId)}`;
+}
+
+function renderCombinedCurves(curves) {
+    const traces = curves.map(curve => ({
+        x: curve.equity_dates,
+        y: curve.equity,
+        mode: 'lines',
+        name: curve.label,
+        customdata: Array(curve.equity.length).fill(curve.strategy_id),
+        hovertemplate: 'Strategy=%{fullData.name}<br>Date=%{x|%Y-%m-%d %H:%M}<br>Equity=%{y:.4f}<extra></extra>'
+    }));
+
+    const layout = makeDarkLayout('Filtered Strategy Universe — Combined Equity Curves', {
+        yaxis: { title: 'Equity', automargin: true, gridcolor: '#1e2a39', zerolinecolor: '#1e2a39' }
+    });
+
+    Plotly.react('equityExplorer', traces, layout, { responsive: true, displaylogo: false });
+
+    const eqDiv = document.getElementById('equityExplorer');
+    eqDiv.on('plotly_click', function(evt) {
+        if (!evt.points || !evt.points.length) return;
+        const strategyId = evt.points[0].customdata;
+        openStrategyPage(strategyId);
+    });
+}
+
+function renderStrategyTable(rows) {
+    const body = document.getElementById('strategyTableBody');
+    body.innerHTML = '';
+
+    if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="9">No strategies matched current filters.</td></tr>';
+        return;
+    }
+
+    rows.forEach(row => {
+        const tr = document.createElement('tr');
+        tr.style.cursor = 'pointer';
+        tr.onclick = () => openStrategyPage(row.strategy_id);
+        tr.innerHTML = `
+            <td>${row.strategy_id}</td>
+            <td>${row.metrics.sharpe}</td>
+            <td>${row.metrics.calmar}</td>
+            <td>${row.metrics.return_pct}</td>
+            <td>${row.metrics.max_drawdown}</td>
+            <td>${row.metrics.num_trades}</td>
+            <td>${row.metrics.win_rate}</td>
+            <td>${row.metrics.profit_factor}</td>
+            <td>${row.usable_start || '-'} → ${row.usable_end || '-'}</td>
+        `;
+        body.appendChild(tr);
+    });
+}
+
+async function loadDetailPage(strategyId) {
+    if (!strategyId) {
+        showError('No strategy id found in route.');
+        return;
+    }
+
+    setStatus(`Loading strategy detail: ${strategyId}`);
+    const payload = await fetchJSON(`/api/strategy/${encodeURIComponent(strategyId)}`);
+
+    renderDetailHeader(payload);
+    renderDetailSummary(payload);
+    renderDetailPanels(payload);
+    renderTradeLog(payload.trades || []);
+    renderDetailEquityChart(payload);
+    renderDetailSignalChart(payload);
+
+    setStatus(`Strategy detail loaded: ${strategyId}`);
+}
+
+function renderDetailHeader(payload) {
+    document.getElementById('detailTitle').textContent = payload.strategy_id || 'Strategy Detail';
+    document.getElementById('detailSubtitle').textContent = `${payload.usable_start || '-'} → ${payload.usable_end || '-'}`;
+}
+
+function renderDetailSummary(payload) {
+    const m = payload.metrics || {};
+    document.getElementById('detailSharpe').textContent = m.sharpe ?? '-';
+    document.getElementById('detailReturn').textContent = m.return_pct ?? '-';
+    document.getElementById('detailMDD').textContent = m.max_drawdown ?? '-';
+    document.getElementById('detailTrades').textContent = m.num_trades ?? '-';
+    document.getElementById('detailWinRate').textContent = m.win_rate ?? '-';
+    document.getElementById('detailPF').textContent = m.profit_factor ?? '-';
+}
+
+function renderDetailPanels(payload) {
+    document.getElementById('detailParams').textContent = JSON.stringify(payload.params || {}, null, 2);
+    document.getElementById('detailMetrics').textContent = JSON.stringify(payload.metrics || {}, null, 2);
+    document.getElementById('detailDebug').textContent = JSON.stringify(payload.debug_summary || {}, null, 2);
+}
+
+function renderTradeLog(trades) {
+    const body = document.getElementById('tradeLogBody');
+    body.innerHTML = '';
+
+    if (!trades.length) {
+        body.innerHTML = '<tr><td colspan="14">No trades available.</td></tr>';
+        return;
+    }
+
+    trades.forEach(t => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${t.entry_date ?? '-'}</td>
+            <td>${t.exit_date ?? '-'}</td>
+            <td>${t.side ?? '-'}</td>
+            <td>${t.entry_price ?? '-'}</td>
+            <td>${t.exit_price ?? '-'}</td>
+            <td>${t.bars_held ?? '-'}</td>
+            <td>${t.position_size_pct ?? '-'}</td>
+            <td>${t.allocated_capital ?? '-'}</td>
+            <td>${t.units ?? '-'}</td>
+            <td>${t.pnl_pct ?? '-'}</td>
+            <td>${t.pnl_cash ?? '-'}</td>
+            <td>${t.entry_zscore ?? '-'}</td>
+            <td>${t.exit_zscore ?? '-'}</td>
+            <td>${t.exit_reason ?? '-'}</td>
+        `;
+        body.appendChild(tr);
+    });
+}
+
+function renderDetailEquityChart(payload) {
+    const chart = payload.chart_data?.equity_chart || {};
+    const traces = [
+        {
+            x: chart.strategy_dates || [],
+            y: chart.strategy_equity || [],
+            mode: 'lines',
+            name: payload.strategy_id || 'Selected Strategy',
+            hovertemplate: 'Date=%{x|%Y-%m-%d %H:%M}<br>Equity=%{y:.4f}<extra></extra>'
+        },
+        {
+            x: chart.benchmark_dates || [],
+            y: chart.benchmark_equity || [],
+            mode: 'lines',
+            name: payload.benchmark?.name || 'Benchmark',
+            hovertemplate: 'Date=%{x|%Y-%m-%d %H:%M}<br>Equity=%{y:.4f}<extra></extra>'
+        }
+    ];
+
+    const layout = makeDarkLayout('Selected Strategy vs Benchmark', {
+        margin: { t: 80, l: 70, r: 200, b: 60 },
+        yaxis: { title: 'Equity', automargin: true, gridcolor: '#1e2a39', zerolinecolor: '#1e2a39' }
+    });
+
+    Plotly.react('detailEquityChart', traces, layout, { responsive: true, displaylogo: false });
+}
+
+function renderDetailSignalChart(payload) {
+    const chart = payload.chart_data?.price_signal_chart || {};
+    const traces = [
+        {
+            x: chart.dates || [],
+            y: chart.close || [],
+            mode: 'lines',
+            name: 'Price',
+            yaxis: 'y',
+            hovertemplate: 'Date=%{x|%Y-%m-%d %H:%M}<br>Price=%{y:.4f}<extra></extra>'
+        },
+        {
+            x: chart.dates || [],
+            y: chart.zscore || [],
+            mode: 'lines',
+            name: 'Z-Score',
+            yaxis: 'y2',
+            hovertemplate: 'Date=%{x|%Y-%m-%d %H:%M}<br>Z=%{y:.4f}<extra></extra>'
+        },
+        {
+            x: chart.long_threshold_dates || [],
+            y: chart.long_threshold || [],
+            mode: 'lines',
+            name: 'Long Threshold',
+            yaxis: 'y2',
+            line: { dash: 'dot' },
+            hoverinfo: 'skip'
+        },
+        {
+            x: chart.short_threshold_dates || [],
+            y: chart.short_threshold || [],
+            mode: 'lines',
+            name: 'Short Threshold',
+            yaxis: 'y2',
+            line: { dash: 'dot' },
+            hoverinfo: 'skip'
+        }
+    ];
+
+    if ((chart.exit_threshold || []).length) {
+        traces.push({
+            x: chart.exit_threshold_dates || [],
+            y: chart.exit_threshold || [],
+            mode: 'lines',
+            name: 'Exit Threshold',
+            yaxis: 'y2',
+            line: { dash: 'dash' },
+            hoverinfo: 'skip'
+        });
+    }
+
+    traces.push(
+        {
+            x: chart.entry_long_dates || [],
+            y: chart.entry_long_prices || [],
+            mode: 'markers',
+            name: 'Long Entry',
+            yaxis: 'y',
+            marker: { size: 10, symbol: 'triangle-up' },
+            hovertemplate: 'Long Entry<br>Date=%{x|%Y-%m-%d %H:%M}<br>Price=%{y:.4f}<extra></extra>'
+        },
+        {
+            x: chart.entry_short_dates || [],
+            y: chart.entry_short_prices || [],
+            mode: 'markers',
+            name: 'Short Entry',
+            yaxis: 'y',
+            marker: { size: 10, symbol: 'triangle-down' },
+            hovertemplate: 'Short Entry<br>Date=%{x|%Y-%m-%d %H:%M}<br>Price=%{y:.4f}<extra></extra>'
+        },
+        {
+            x: chart.exit_dates || [],
+            y: chart.exit_prices || [],
+            mode: 'markers',
+            name: 'Exit',
+            yaxis: 'y',
+            marker: { size: 9, symbol: 'circle' },
+            hovertemplate: 'Exit<br>Date=%{x|%Y-%m-%d %H:%M}<br>Price=%{y:.4f}<extra></extra>'
+        }
+    );
+
+    const layout = makeDarkLayout('Price + Signal + Trade Markers', {
+        margin: { t: 80, l: 70, r: 220, b: 60 },
+        yaxis: {
+            title: 'Price',
+            automargin: true,
+            gridcolor: '#1e2a39',
+            zerolinecolor: '#1e2a39'
+        },
+        yaxis2: {
+            title: 'Z-Score',
+            overlaying: 'y',
+            side: 'right',
+            automargin: true,
+            showgrid: false,
+            zerolinecolor: '#1e2a39'
+        }
+    });
+
+    Plotly.react('detailSignalChart', traces, layout, { responsive: true, displaylogo: false });
+}
+
+async function initOverview() {
+    setViewMode('overview');
+
+    setStatus('Loading benchmark...');
+    state.benchmark = await fetchJSON('/api/benchmark');
+
+    setStatus('Loading filter options...');
+    state.filterOptions = await fetchJSON('/api/filter-options');
+    renderFilterOptions(state.filterOptions);
+
+    setStatus('Loading modes...');
+    const modesPayload = await fetchJSON('/api/modes');
+    state.modes = modesPayload.modes || [];
+    renderModeTabs(state.modes);
+
+    if (!state.modes.length) {
+        throw new Error('No modes returned from backend.');
+    }
+
+    const saved = loadSavedFilterState();
+    const initialMode = saved?.mode || state.modes[0].key;
+
+    markActiveMode(initialMode);
+    await loadMode(initialMode);
+    applySavedFilters(saved);
+    await applyFilter();
+
+    requestAnimationFrame(() => restoreOverviewScroll());
+}
+
+async function initDetail() {
+    setViewMode('detail');
+    document.getElementById('badgeMode').textContent = 'Mode: Strategy Detail';
+    document.getElementById('badgeCurves').textContent = 'Curves: Detail Page';
+    await loadDetailPage(state.strategyIdFromPath);
+}
+
+async function init() {
+    try {
+        setStatus('Loading meta...');
+        const meta = await fetchJSON('/api/meta');
+        state.meta = meta;
+        renderHeader(meta);
+
+        if (state.view === 'detail') {
+            await initDetail();
+        } else {
+            await initOverview();
+        }
+
+        setStatus('Dashboard ready.');
+    } catch (err) {
+        showError(err.stack || err.message || String(err));
+        setStatus('Dashboard failed to load.');
+    }
+}
+
+document.getElementById('btnApply').addEventListener('click', async () => {
+    await applyFilter();
+});
+
+document.getElementById('btnReset').addEventListener('click', async () => {
+    sessionStorage.removeItem(FILTER_STATE_KEY);
+    sessionStorage.removeItem(OVERVIEW_SCROLL_KEY);
+    resetAllFilters();
+    await applyFilter();
+});
+
+document.getElementById('btnTop').addEventListener('click', () => {
+    if (state.filteredSummaries.length > 0) {
+        openStrategyPage(state.filteredSummaries[0].strategy_id);
+    }
+});
+
+document.getElementById('btnBackOverview').addEventListener('click', (e) => {
+    e.preventDefault();
+    if (document.referrer && document.referrer.includes(window.location.origin)) {
+        window.history.back();
+    } else {
+        window.location.href = '/';
+    }
+});
+
+window.addEventListener('beforeunload', () => {
+    if (state.view === 'overview') {
+        saveFilterState();
+        saveOverviewScroll();
+    }
+});
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: mqengine
+Version: 0.3.0
+Summary: MQENGINE backtest runtime + sweep dashboard inspired by NVT workflow
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: flask>=3.0.0
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: pandas>=2.0.0
