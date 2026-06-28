@@ -15,6 +15,8 @@ DETAIL_CHART_MAX_POINTS = 1800
 def _sort_filtered_df(df: pd.DataFrame, sort_by: str) -> pd.DataFrame:
     if df.empty:
         return df
+    if sort_by in df.columns and pd.api.types.is_numeric_dtype(df[sort_by]):
+        return df.sort_values([sort_by, "return_pct"], ascending=[False, False]).reset_index(drop=True)
     if sort_by == "sharpe":
         return df.sort_values(["sharpe", "return_pct"], ascending=[False, False]).reset_index(drop=True)
     if sort_by == "calmar":
@@ -41,9 +43,80 @@ def _build_filter_options(sweep_result: SweepResult) -> dict[str, list[Any]]:
     return sweep_result.filter_options()
 
 
+def _build_metric_payload(results_df: pd.DataFrame, metric_col: str, title: str, description: str) -> dict:
+    if metric_col not in results_df.columns:
+        return {"description": f"{title} is not available for this result set.", "chart": {"traces": [], "layout": {"title": title}}}
+
+    if "rolling_window" in results_df.columns and "short_threshold" in results_df.columns:
+        heatmap_df = results_df.groupby(["rolling_window", "short_threshold"], as_index=False)[metric_col].max()
+        x_vals = sorted(heatmap_df["short_threshold"].unique().tolist())
+        y_vals = sorted(heatmap_df["rolling_window"].unique().tolist())
+        z = []
+        for rw in y_vals:
+            row = []
+            for thr in x_vals:
+                match = heatmap_df[(heatmap_df["rolling_window"] == rw) & (heatmap_df["short_threshold"] == thr)]
+                row.append(float(match[metric_col].iloc[0]) if not match.empty else None)
+            z.append(row)
+        return {
+            "description": description,
+            "chart": {
+                "traces": [{
+                    "x": x_vals,
+                    "y": y_vals,
+                    "z": z,
+                    "type": "heatmap",
+                    "hovertemplate": f"Short Thr=%{{x}}<br>Rolling=%{{y}}<br>{title}=%{{z}}<extra></extra>",
+                }],
+                "layout": {"title": title, "xaxis": {"title": "Short Threshold"}, "yaxis": {"title": "Rolling Window"}},
+            },
+        }
+
+    top = results_df.sort_values(metric_col, ascending=False).head(20)
+    return {
+        "description": description,
+        "chart": {
+            "traces": [{
+                "x": top["strategy_id"].tolist(),
+                "y": top[metric_col].astype(float).tolist(),
+                "type": "bar",
+                "hovertemplate": f"Strategy=%{{x}}<br>{title}=%{{y}}<extra></extra>",
+            }],
+            "layout": {"title": title, "xaxis": {"title": "Strategy"}, "yaxis": {"title": title}},
+        },
+    }
+
+
 def _build_mode_payload(results_df: pd.DataFrame, mode_key: str) -> dict:
     if results_df is None or results_df.empty:
         return {"description": "No results available.", "chart": {"traces": [], "layout": {"title": "No Data"}}}
+
+    metric_modes = {
+        "trade_sharpe": ("trade_sharpe", "Trade Sharpe Heatmap", "Trade-level Sharpe computed from closed-trade account returns."),
+        "period_sharpe": ("period_sharpe", "Period Sharpe Heatmap", "Period Sharpe computed from equity curve period returns."),
+        "sortino": ("sortino", "Sortino Heatmap", "Downside-risk-adjusted period return."),
+        "calmar": ("calmar", "Calmar Heatmap", "CAGR divided by max drawdown."),
+        "max_drawdown": ("max_drawdown", "Max Drawdown Heatmap", "Maximum drawdown percentage; lower is better."),
+        "stability": ("validation_is_oos_consistency_score", "Parameter Stability", "IS/OOS consistency score across parameter sets."),
+    }
+    if mode_key in metric_modes:
+        metric_col, title, description = metric_modes[mode_key]
+        return _build_metric_payload(results_df, metric_col, title, description)
+
+    if mode_key == "is_oos":
+        if "in_sample_period_sharpe" in results_df.columns and "out_sample_period_sharpe" in results_df.columns:
+            top = results_df.sort_values("period_sharpe", ascending=False).head(20)
+            return {
+                "description": "Compare in-sample and out-of-sample period Sharpe for top full-period strategies.",
+                "chart": {
+                    "traces": [
+                        {"x": top["strategy_id"].tolist(), "y": top["in_sample_period_sharpe"].astype(float).tolist(), "type": "bar", "name": "In Sample"},
+                        {"x": top["strategy_id"].tolist(), "y": top["out_sample_period_sharpe"].astype(float).tolist(), "type": "bar", "name": "Out Sample"},
+                    ],
+                    "layout": {"title": "IS/OOS Period Sharpe", "barmode": "group"},
+                },
+            }
+        return {"description": "IS/OOS metrics are available after running sweep.run_research(...).", "chart": {"traces": [], "layout": {"title": "IS/OOS Comparison"}}}
 
     if mode_key == "sharpe":
         if "rolling_window" in results_df.columns and "short_threshold" in results_df.columns:
@@ -174,10 +247,15 @@ def build_sweep_dashboard_app(sweep_result: SweepResult) -> Flask:
     details = {r.strategy_id: r for r in sweep_result.strategy_results}
     filter_options = _build_filter_options(sweep_result)
     modes = [
-        {"key": "sharpe", "label": "Sharpe Heatmap"},
+        {"key": "trade_sharpe", "label": "Trade Sharpe Heatmap"},
+        {"key": "period_sharpe", "label": "Period Sharpe Heatmap"},
+        {"key": "sortino", "label": "Sortino Heatmap"},
+        {"key": "calmar", "label": "Calmar Heatmap"},
+        {"key": "max_drawdown", "label": "Max Drawdown Heatmap"},
+        {"key": "is_oos", "label": "IS/OOS Comparison"},
+        {"key": "stability", "label": "Parameter Stability"},
         {"key": "walkforward", "label": "Walk-Forward"},
         {"key": "montecarlo", "label": "Monte Carlo"},
-        {"key": "stability", "label": "Parameter Stability"},
     ]
     first_result = sweep_result.strategy_results[0] if sweep_result.strategy_results else None
 
@@ -242,24 +320,33 @@ def build_sweep_dashboard_app(sweep_result: SweepResult) -> Flask:
         strategies = []
         for _, row in filtered.iterrows():
             params = {k: row[k] for k in sweep_result.param_columns if k in row}
+            metric_keys = [
+                "return_pct",
+                "sharpe",
+                "trade_sharpe",
+                "period_sharpe",
+                "sortino",
+                "max_drawdown",
+                "net_profit",
+                "cagr_pct",
+                "calmar",
+                "num_trades",
+                "win_rate",
+                "profit_factor",
+                "avg_trade_pct",
+                "trades_per_year",
+            ]
+            metrics = {}
+            for key in metric_keys:
+                if key not in row or pd.isna(row[key]):
+                    continue
+                metrics[key] = int(row[key]) if key == "num_trades" else float(row[key])
             strategies.append({
                 "strategy_id": row["strategy_id"],
                 "name": row["name"],
                 "code_ref": "mqengine/sweep",
                 "params": params,
-                "metrics": {
-                    "return_pct": float(row["return_pct"]),
-                    "sharpe": float(row["sharpe"]),
-                    "max_drawdown": float(row["max_drawdown"]),
-                    "net_profit": float(row["net_profit"]),
-                    "cagr_pct": float(row["cagr_pct"]),
-                    "calmar": float(row["calmar"]),
-                    "num_trades": int(row["num_trades"]),
-                    "win_rate": float(row["win_rate"]),
-                    "profit_factor": float(row["profit_factor"]),
-                    "avg_trade_pct": float(row["avg_trade_pct"]),
-                    "trades_per_year": float(row["trades_per_year"]),
-                },
+                "metrics": metrics,
                 "usable_start": row["usable_start"],
                 "usable_end": row["usable_end"],
                 "usable_rows": int(row["usable_rows"]),

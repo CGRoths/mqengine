@@ -9,6 +9,7 @@ import pandas as pd
 
 from .conditions import BaseCondition, Above, Below, CrossAbove, CrossBelow
 from .metrics import compute_metrics
+from .research import ResearchProtocol, apply_research_protocol, slice_runner
 from .result import BacktestResult
 from .transforms import transform_registry
 from .types import PreparedData, StrategyConfig
@@ -171,6 +172,8 @@ class BacktestEngine:
         entry_signal = None
         allocated_capital = 0.0
         units = 0.0
+        entry_fee_cash = 0.0
+        entry_slippage_cash = 0.0
 
         fee_pct = float(config.risk.fee_pct)
         slippage_pct = float(config.risk.slippage_pct)
@@ -226,9 +229,9 @@ class BacktestEngine:
                         exit_price = close
 
                 if exit_reason is not None:
-                    fee_cash = allocated_capital * fee_pct
-                    slip_cash = allocated_capital * slippage_pct
-                    pnl_cash = units * (float(exit_price) - entry_price) * position - fee_cash - slip_cash
+                    exit_fee_cash = allocated_capital * fee_pct
+                    exit_slippage_cash = allocated_capital * slippage_pct
+                    pnl_cash = units * (float(exit_price) - entry_price) * position - exit_fee_cash - exit_slippage_cash
 
                     equity_before = equity
                     account_return_pct = ((equity_before + pnl_cash) / equity_before - 1.0) * 100.0 if equity_before > 0 else 0.0
@@ -249,6 +252,8 @@ class BacktestEngine:
                         "pnl_pct": round(float(pnl_pct_trade), 6),
                         "pnl_cash": round(float(pnl_cash), 6),
                         "account_return_pct": round(float(account_return_pct), 6),
+                        "fee_cash": round(float(entry_fee_cash + exit_fee_cash), 6),
+                        "slippage_cash": round(float(entry_slippage_cash + exit_slippage_cash), 6),
                         "entry_signal": round(float(entry_signal), 6) if entry_signal is not None else None,
                         "exit_signal": round(float(sig), 6),
                         "exit_reason": exit_reason,
@@ -261,6 +266,8 @@ class BacktestEngine:
                     entry_signal = None
                     allocated_capital = 0.0
                     units = 0.0
+                    entry_fee_cash = 0.0
+                    entry_slippage_cash = 0.0
                     exited_this_bar = True
 
             can_reenter = (not exited_this_bar) or allow_same_bar_reentry
@@ -279,9 +286,9 @@ class BacktestEngine:
                     allocated_capital = equity * position_size_pct
                     units = allocated_capital / entry_price if entry_price > 0 else 0.0
 
-                    fee_cash = allocated_capital * fee_pct
-                    slip_cash = allocated_capital * slippage_pct
-                    equity = equity - fee_cash - slip_cash
+                    entry_fee_cash = allocated_capital * fee_pct
+                    entry_slippage_cash = allocated_capital * slippage_pct
+                    equity = equity - entry_fee_cash - entry_slippage_cash
 
             mtm_equity = equity
             if position != 0 and entry_price > 0:
@@ -295,9 +302,9 @@ class BacktestEngine:
             final_price = float(close_arr[-1])
             final_signal = float(signal_arr[-1])
 
-            fee_cash = allocated_capital * fee_pct
-            slip_cash = allocated_capital * slippage_pct
-            pnl_cash = units * (final_price - entry_price) * position - fee_cash - slip_cash
+            exit_fee_cash = allocated_capital * fee_pct
+            exit_slippage_cash = allocated_capital * slippage_pct
+            pnl_cash = units * (final_price - entry_price) * position - exit_fee_cash - exit_slippage_cash
 
             equity_before = equity
             account_return_pct = ((equity_before + pnl_cash) / equity_before - 1.0) * 100.0 if equity_before > 0 else 0.0
@@ -319,6 +326,8 @@ class BacktestEngine:
                 "pnl_pct": round(float(pnl_pct_trade), 6),
                 "pnl_cash": round(float(pnl_cash), 6),
                 "account_return_pct": round(float(account_return_pct), 6),
+                "fee_cash": round(float(entry_fee_cash + exit_fee_cash), 6),
+                "slippage_cash": round(float(entry_slippage_cash + exit_slippage_cash), 6),
                 "entry_signal": round(float(entry_signal), 6) if entry_signal is not None else None,
                 "exit_signal": round(float(final_signal), 6),
                 "exit_reason": "forced_end",
@@ -338,6 +347,7 @@ class BacktestEngine:
             trades=trades,
             start_ts=pd.Timestamp(ts_arr[0]),
             end_ts=pd.Timestamp(ts_arr[-1]),
+            timestamps=df["ts"],
         )
 
         strategy_id = _strategy_id_from_name_and_params(config.name, config.params)
@@ -480,3 +490,17 @@ class StrategyRunner:
     def run(self) -> BacktestResult:
         prepared = self.prepare()
         return self._engine.run(prepared, self._config)
+
+    def slice(self, start, end) -> "StrategyRunner":
+        return slice_runner(self, start, end, inclusive_end=True)
+
+    def run_research(self, protocol: ResearchProtocol | dict) -> BacktestResult:
+        if isinstance(protocol, dict):
+            protocol = ResearchProtocol(**protocol)
+        runner = self
+        if protocol.start is not None or protocol.end is not None:
+            idx = pd.to_datetime(self._raw_price.index)
+            start = pd.Timestamp(protocol.start) if protocol.start is not None else pd.Timestamp(idx.min())
+            end = pd.Timestamp(protocol.end) if protocol.end is not None else pd.Timestamp(idx.max())
+            runner = self.slice(start, end)
+        return apply_research_protocol(runner.run(), protocol)

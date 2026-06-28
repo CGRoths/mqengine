@@ -85,6 +85,8 @@ class BacktestResult:
     signal_col: str
     benchmark_col: Optional[str] = None
     meta: dict[str, Any] = field(default_factory=dict)
+    validation: dict[str, Any] = field(default_factory=dict)
+    research: dict[str, Any] = field(default_factory=dict)
 
     def debug_summary(self) -> dict:
         return build_debug_summary_from_trades(self.trades)
@@ -103,6 +105,8 @@ class BacktestResult:
             "signal_col": self.signal_col,
             "benchmark_col": self.benchmark_col,
             "meta": self.meta,
+            "validation": self.validation,
+            "research": self.research,
         }
 
     def build_chart_payload(self, max_points: int = 1800) -> dict[str, Any]:
@@ -197,6 +201,8 @@ class BacktestResult:
             "strategy_id": self.strategy_id,
             "params": self.params,
             "metrics": self.metrics,
+            "validation": self.validation,
+            "research": self.research,
             "usable_start": pd.Timestamp(self.data["ts"].iloc[0]).strftime("%Y-%m-%d %H:%M:%S"),
             "usable_end": pd.Timestamp(self.data["ts"].iloc[-1]).strftime("%Y-%m-%d %H:%M:%S"),
             "usable_rows": int(len(self.data)),
@@ -211,6 +217,18 @@ class BacktestResult:
 
     def to_json(self) -> str:
         return json.dumps(self.to_payload())
+
+    def to_research_report(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "strategy_id": self.strategy_id,
+            "params": self.params,
+            "metrics": self.metrics,
+            "validation": self.validation,
+            "research": self.research,
+            "trades": self.trades,
+            "debug_summary": self.debug_summary(),
+        }
 
     def to_flask_app(self):
         from .dashboard import build_single_dashboard_app

@@ -1,20 +1,9 @@
 from __future__ import annotations
 
-import math
-from typing import Iterable
 import numpy as np
 import pandas as pd
 
-
-def compute_trade_sharpe(trade_account_returns: Iterable[float], trades_per_year: float) -> float:
-    arr = np.asarray(list(trade_account_returns), dtype=float)
-    if arr.size < 2:
-        return 0.0
-    mean_r = float(np.mean(arr))
-    std_r = float(np.std(arr, ddof=0))
-    if std_r <= 1e-12:
-        return 0.0
-    return (mean_r / std_r) * math.sqrt(max(trades_per_year, 1e-12))
+from .risk import compute_period_metrics, compute_trade_metrics, compute_trade_sharpe
 
 
 def compute_equity_drawdown_stats(equity: np.ndarray) -> tuple[float, float]:
@@ -32,53 +21,56 @@ def compute_equity_drawdown_stats(equity: np.ndarray) -> tuple[float, float]:
     return total_return, max_dd
 
 
-def compute_metrics(equity: np.ndarray, trades: list[dict], start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> dict:
+def compute_metrics(
+    equity: np.ndarray,
+    trades: list[dict],
+    start_ts: pd.Timestamp,
+    end_ts: pd.Timestamp,
+    *,
+    timestamps=None,
+    periods_per_year: float | None = None,
+    calendar: str = "crypto_365",
+) -> dict:
     total_return, max_dd = compute_equity_drawdown_stats(equity)
     net_profit = float(equity[-1] - equity[0]) if len(equity) else 0.0
     total_days = max((end_ts - start_ts).total_seconds() / 86400.0, 1.0)
 
-    if trades:
-        trade_account_returns = [float(t["account_return_pct"]) / 100.0 for t in trades]
-        trades_per_year = (len(trades) / total_days) * 365.0
-        sharpe = compute_trade_sharpe(trade_account_returns, trades_per_year)
-    else:
-        trade_account_returns = []
-        trades_per_year = 0.0
-        sharpe = 0.0
+    if timestamps is None:
+        if len(equity) > 1:
+            timestamps = pd.date_range(pd.Timestamp(start_ts), pd.Timestamp(end_ts), periods=len(equity))
+        elif len(equity) == 1:
+            timestamps = [pd.Timestamp(start_ts)]
+        else:
+            timestamps = []
 
-    if len(equity) >= 2 and equity[0] > 0 and equity[-1] > 0:
-        years = total_days / 365.0
-        log_ratio = math.log(equity[-1] / equity[0])
-        annual_log_return = log_ratio / max(years, 1e-12)
-        annual_log_return = max(min(annual_log_return, 700), -700)
-        cagr = math.exp(annual_log_return) - 1.0
-    else:
-        cagr = 0.0
+    period_metrics = compute_period_metrics(
+        equity,
+        timestamps,
+        periods_per_year=periods_per_year,
+        calendar=calendar,
+    )
+    trade_metrics = compute_trade_metrics(
+        trades,
+        total_days=total_days,
+        equity_points=len(equity),
+    )
 
-    calmar = (cagr / max_dd) if max_dd > 1e-12 else 0.0
+    trade_sharpe = float(trade_metrics["trade_sharpe"])
+    cagr_pct = float(period_metrics["cagr_pct"])
+    calmar = float(period_metrics["calmar"])
+    profit_factor = float(trade_metrics["profit_factor"])
+    win_rate = float(trade_metrics["win_rate"])
+    avg_trade_pct = float(trade_metrics["avg_trade_return"])
+    num_trades = int(trade_metrics["num_trades"])
+    trades_per_year = float(trade_metrics["trades_per_year"])
 
-    if trade_account_returns:
-        arr = np.asarray(trade_account_returns, dtype=float)
-        wins = arr[arr > 0]
-        losses = arr[arr < 0]
-        gross_win = float(wins.sum()) if len(wins) else 0.0
-        gross_loss = abs(float(losses.sum())) if len(losses) else 0.0
-        profit_factor = (gross_win / gross_loss) if gross_loss > 1e-12 else (gross_win if gross_win > 0 else 0.0)
-        win_rate = float((arr > 0).mean() * 100.0)
-        avg_trade_pct = float(arr.mean() * 100.0)
-        num_trades = int(len(arr))
-    else:
-        profit_factor = 0.0
-        win_rate = 0.0
-        avg_trade_pct = 0.0
-        num_trades = 0
-
-    return {
+    out = {
         "return_pct": round(total_return * 100.0, 2),
-        "sharpe": round(sharpe, 3),
+        "sharpe": round(trade_sharpe, 3),
+        "trade_sharpe": round(trade_sharpe, 3),
         "max_drawdown": round(max_dd * 100.0, 2),
         "net_profit": round(net_profit, 2),
-        "cagr_pct": round(cagr * 100.0, 2),
+        "cagr_pct": round(cagr_pct, 2),
         "calmar": round(calmar, 3),
         "num_trades": num_trades,
         "win_rate": round(win_rate, 2),
@@ -86,3 +78,36 @@ def compute_metrics(equity: np.ndarray, trades: list[dict], start_ts: pd.Timesta
         "avg_trade_pct": round(avg_trade_pct, 2),
         "trades_per_year": round(float(trades_per_year), 3),
     }
+
+    out.update({
+        "period_sharpe": round(float(period_metrics["period_sharpe"]), 3),
+        "sortino": round(float(period_metrics["sortino"]), 3),
+        "rolling_sharpe": round(float(period_metrics["rolling_sharpe"]), 3),
+        "rolling_sortino": round(float(period_metrics["rolling_sortino"]), 3),
+        "volatility_annualized": round(float(period_metrics["volatility_annualized"]), 3),
+        "downside_volatility": round(float(period_metrics["downside_volatility"]), 3),
+        "cagr": round(float(period_metrics["cagr"]), 6),
+        "max_drawdown_pct": round(float(period_metrics["max_drawdown_pct"]), 3),
+        "max_drawdown_start": period_metrics["max_drawdown_start"],
+        "max_drawdown_end": period_metrics["max_drawdown_end"],
+        "max_drawdown_recovery": period_metrics["max_drawdown_recovery"],
+        "max_drawdown_duration_days": round(float(period_metrics["max_drawdown_duration_days"]), 3),
+        "median_trade_return": round(float(trade_metrics["median_trade_return"]), 3),
+        "best_trade": round(float(trade_metrics["best_trade"]), 3),
+        "worst_trade": round(float(trade_metrics["worst_trade"]), 3),
+        "avg_trade_return": round(float(trade_metrics["avg_trade_return"]), 3),
+        "avg_holding_bars": round(float(trade_metrics["avg_holding_bars"]), 3),
+        "avg_holding_time": round(float(trade_metrics["avg_holding_time"]), 3),
+        "time_in_market_pct": round(float(trade_metrics["time_in_market_pct"]), 3),
+        "turnover": round(float(trade_metrics["turnover"]), 3),
+        "fee_drag": round(float(trade_metrics["fee_drag"]), 6),
+        "slippage_drag": round(float(trade_metrics["slippage_drag"]), 6),
+        "gross_pnl": round(float(trade_metrics["gross_pnl"]), 6),
+        "net_pnl": round(float(trade_metrics["net_pnl"]), 6),
+        "VaR_95": round(float(period_metrics["VaR_95"]), 3),
+        "CVaR_95": round(float(period_metrics["CVaR_95"]), 3),
+        "skew": round(float(period_metrics["skew"]), 3),
+        "kurtosis": round(float(period_metrics["kurtosis"]), 3),
+    })
+
+    return out

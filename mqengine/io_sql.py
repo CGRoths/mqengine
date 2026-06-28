@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from typing import Optional
 import pandas as pd
-from sqlalchemy import text
+
+from .alignment import align_signal_to_bars
+
+try:
+    from sqlalchemy import text
+except ImportError:  # pragma: no cover - exercised only when optional SQLAlchemy is absent.
+    def text(sql: str) -> str:
+        return sql
 
 
 def fetch_sql_signal(conn_or_engine, *, table_name: str, ts_col: str, value_col: str, start_ts, end_ts, where_sql: str = "") -> pd.DataFrame:
