@@ -64,13 +64,30 @@ app = sweep_result.to_flask_app()
 
 Sweep rows include trade Sharpe, period Sharpe, Sortino, Calmar, drawdown metrics, IS/OOS metrics, and stability metadata.
 
-## Trade Sharpe vs Period Sharpe
+## Three Sharpe Metrics
 
 - `trade_sharpe`: computed from closed-trade account returns.
 - `period_sharpe`: computed from equity curve period returns.
+- `adrs_sharpe`: ADRS-compatible Sharpe computed from period `pnl`/return streams with sample standard deviation (`ddof=1`) and crypto-365 annualization.
 - `sharpe`: legacy alias for `trade_sharpe`.
 
-Use `period_sharpe` for portfolio/risk comparisons and `trade_sharpe` when analyzing the closed-trade distribution.
+Use `period_sharpe` for portfolio/risk comparisons, `trade_sharpe` when analyzing the closed-trade distribution, and `adrs_sharpe` when comparing MQEngine research output to ADRS-style alpha research.
+
+## Research Split
+
+`runner.run_research(protocol)` returns `result.metrics` with four standard sections:
+
+- `full`: full-period metrics, left unprefixed when flattened for main ranking.
+- `in_sample`: metrics for the configured training/research period.
+- `out_sample`: metrics for the configured validation period.
+- `validation`: OOS pass/fail, period/trade/ADRS Sharpe decay, return decay, drawdown expansion, consistency score, and warnings.
+
+`flatten_research_metrics(result)` keeps full metrics unprefixed and adds `in_sample_`, `out_sample_`, and `validation_` prefixes for sweep tables.
+
+## Execution Modes
+
+- `ohlc_event`: the default `StrategyRunner` path. It preserves MQEngine's OHLC event execution, entry/exit conditions, fees, slippage, stops, take-profit, trade records, and dashboard payloads.
+- `vectorized_signal_return`: fast alpha research via `run_vectorized_signal_backtest(price_df, signal_df)` or `btdash.vectorized_signal_backtest(...)`. It aligns signals to prices, applies a lagged previous signal to returns to avoid same-bar lookahead, reports turnover separately, and computes the same standard metrics including `adrs_sharpe`.
 
 ## MQNode SQL Alignment
 

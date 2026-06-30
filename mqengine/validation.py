@@ -170,3 +170,89 @@ def validate_signal(
             _warning(warnings, "stale_signal", "Signal is older than the configured stale_after threshold.", stale_count)
 
     return ValidationReport(errors=errors, warnings=warnings)
+
+
+def validate_strategy_signal(
+    df: pd.DataFrame,
+    ts_col: str = "ts",
+    signal_col: str = "signal",
+    *,
+    require_numeric: bool = True,
+    min_value: float | None = -1.0,
+    max_value: float | None = 1.0,
+    allow_nan: bool = False,
+    require_monotonic_ts: bool = True,
+) -> dict[str, Any]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    rows = int(len(df))
+
+    out: dict[str, Any] = {
+        "ok": False,
+        "warnings": warnings,
+        "errors": errors,
+        "rows": rows,
+        "null_signal_count": 0,
+        "duplicate_ts_count": 0,
+        "min_signal": None,
+        "max_signal": None,
+    }
+
+    missing = [col for col in [ts_col, signal_col] if col not in df.columns]
+    if missing:
+        errors.append(f"missing_columns:{','.join(missing)}")
+        return out
+
+    ts = pd.to_datetime(df[ts_col], errors="coerce")
+    invalid_ts_count = int(ts.isna().sum())
+    if invalid_ts_count:
+        errors.append(f"invalid_timestamp:{invalid_ts_count}")
+
+    duplicate_ts_count = int(ts.duplicated().sum())
+    out["duplicate_ts_count"] = duplicate_ts_count
+    if duplicate_ts_count:
+        warnings.append(f"duplicate_timestamps:{duplicate_ts_count}")
+
+    if require_monotonic_ts and not ts.dropna().is_monotonic_increasing:
+        errors.append("timestamp_not_monotonic")
+
+    if require_numeric:
+        sig = pd.to_numeric(df[signal_col], errors="coerce")
+    else:
+        sig = df[signal_col]
+
+    null_signal_count = int(pd.isna(sig).sum())
+    out["null_signal_count"] = null_signal_count
+    if null_signal_count and not allow_nan:
+        errors.append(f"null_signal:{null_signal_count}")
+    elif null_signal_count:
+        warnings.append(f"null_signal:{null_signal_count}")
+
+    if require_numeric:
+        original_nulls = int(pd.isna(df[signal_col]).sum())
+        non_numeric_count = max(null_signal_count - original_nulls, 0)
+        if non_numeric_count:
+            errors.append(f"non_numeric_signal:{non_numeric_count}")
+
+        inf_count = int(np.isinf(sig.dropna()).sum())
+        if inf_count:
+            errors.append(f"infinite_signal:{inf_count}")
+
+        finite = sig.replace([np.inf, -np.inf], np.nan).dropna()
+        if not finite.empty:
+            min_signal = float(finite.min())
+            max_signal = float(finite.max())
+            out["min_signal"] = min_signal
+            out["max_signal"] = max_signal
+
+            if min_value is not None:
+                below_count = int((finite < float(min_value)).sum())
+                if below_count:
+                    errors.append(f"signal_below_min:{below_count}")
+            if max_value is not None:
+                above_count = int((finite > float(max_value)).sum())
+                if above_count:
+                    errors.append(f"signal_above_max:{above_count}")
+
+    out["ok"] = len(errors) == 0
+    return out

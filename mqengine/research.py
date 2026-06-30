@@ -19,6 +19,8 @@ class ResearchProtocol:
     out_sample: tuple[str | pd.Timestamp, str | pd.Timestamp] | None = None
     calendar: str = "crypto_365"
     periods_per_year: float | None = None
+    primary_objective: str = "period_sharpe"
+    secondary_objectives: tuple[str, ...] = ("trade_sharpe", "adrs_sharpe", "return_pct", "max_drawdown_pct")
     min_oos_trades: int = 5
     sharpe_decay_warn: float = 0.50
     return_decay_warn: float = 0.50
@@ -108,26 +110,50 @@ def _decay(is_value: float, oos_value: float) -> float:
     return float((is_value - oos_value) / abs(is_value))
 
 
+def _metric_float(metrics: dict[str, Any], key: str, default: float = 0.0) -> float:
+    value = metrics.get(key, default)
+    try:
+        out = float(value if value is not None else default)
+    except (TypeError, ValueError):
+        return default
+    if not np.isfinite(out):
+        return default
+    return out
+
+
 def evaluate_is_oos_validation(
     in_sample_metrics: dict[str, Any],
     out_sample_metrics: dict[str, Any],
     protocol: ResearchProtocol,
 ) -> dict[str, Any]:
-    is_sharpe = float(in_sample_metrics.get("period_sharpe", in_sample_metrics.get("sharpe", 0.0)) or 0.0)
-    oos_sharpe = float(out_sample_metrics.get("period_sharpe", out_sample_metrics.get("sharpe", 0.0)) or 0.0)
-    is_return = float(in_sample_metrics.get("return_pct", 0.0) or 0.0)
-    oos_return = float(out_sample_metrics.get("return_pct", 0.0) or 0.0)
-    is_mdd = float(in_sample_metrics.get("max_drawdown_pct", in_sample_metrics.get("max_drawdown", 0.0)) or 0.0)
-    oos_mdd = float(out_sample_metrics.get("max_drawdown_pct", out_sample_metrics.get("max_drawdown", 0.0)) or 0.0)
+    decay_by_metric = {}
+    for metric_name in ("period_sharpe", "trade_sharpe", "adrs_sharpe"):
+        decay_by_metric[metric_name] = _decay(
+            _metric_float(in_sample_metrics, metric_name),
+            _metric_float(out_sample_metrics, metric_name),
+        )
 
-    sharpe_decay = _decay(is_sharpe, oos_sharpe)
+    primary_objective = protocol.primary_objective
+    primary_decay = decay_by_metric.get(primary_objective)
+    if primary_decay is None:
+        primary_decay = _decay(
+            _metric_float(in_sample_metrics, primary_objective),
+            _metric_float(out_sample_metrics, primary_objective),
+        )
+
+    is_primary = _metric_float(in_sample_metrics, primary_objective)
+    is_return = _metric_float(in_sample_metrics, "return_pct")
+    oos_return = _metric_float(out_sample_metrics, "return_pct")
+    is_mdd = _metric_float(in_sample_metrics, "max_drawdown_pct", _metric_float(in_sample_metrics, "max_drawdown"))
+    oos_mdd = _metric_float(out_sample_metrics, "max_drawdown_pct", _metric_float(out_sample_metrics, "max_drawdown"))
+
     return_decay = _decay(is_return, oos_return)
     mdd_expansion = (oos_mdd / max(is_mdd, 1e-12)) - 1.0 if oos_mdd > 0.0 else 0.0
 
     warnings: list[str] = []
     if int(out_sample_metrics.get("num_trades", 0) or 0) < protocol.min_oos_trades:
         warnings.append("oos_trades_too_few")
-    if is_sharpe > 0.0 and sharpe_decay > protocol.sharpe_decay_warn:
+    if is_primary > 0.0 and primary_decay > protocol.sharpe_decay_warn:
         warnings.append("oos_sharpe_drops_too_much")
     if is_return > 0.0 and return_decay > protocol.return_decay_warn:
         warnings.append("oos_return_collapses")
@@ -135,14 +161,19 @@ def evaluate_is_oos_validation(
         warnings.append("oos_drawdown_much_worse_than_is")
 
     score = 100.0
-    score -= max(sharpe_decay, 0.0) * 35.0
+    score -= max(primary_decay, 0.0) * 35.0
     score -= max(return_decay, 0.0) * 30.0
     score -= max(mdd_expansion, 0.0) * 15.0
     score -= max(protocol.min_oos_trades - int(out_sample_metrics.get("num_trades", 0) or 0), 0) * 3.0
     score = max(min(score, 100.0), 0.0)
 
     return {
-        "oos_sharpe_decay": round(float(sharpe_decay), 6),
+        "primary_objective": primary_objective,
+        "secondary_objectives": tuple(protocol.secondary_objectives),
+        "oos_period_sharpe_decay": round(float(decay_by_metric["period_sharpe"]), 6),
+        "oos_trade_sharpe_decay": round(float(decay_by_metric["trade_sharpe"]), 6),
+        "oos_adrs_sharpe_decay": round(float(decay_by_metric["adrs_sharpe"]), 6),
+        "oos_sharpe_decay": round(float(primary_decay), 6),
         "oos_return_decay": round(float(return_decay), 6),
         "oos_mdd_expansion": round(float(mdd_expansion), 6),
         "is_oos_consistency_score": round(float(score), 3),
@@ -241,11 +272,14 @@ def slice_runner(runner, start: Any, end: Any, *, inclusive_end: bool = True):
 
 
 def _objective_from_row(row: pd.Series, objective: str) -> float:
-    if objective in row:
-        return float(row[objective])
-    if f"full_{objective}" in row:
-        return float(row[f"full_{objective}"])
-    return float(row.get("sharpe", 0.0))
+    fallbacks = (objective, "period_sharpe", "adrs_sharpe", "trade_sharpe", "sharpe", "return_pct")
+    for col in fallbacks:
+        if col in row:
+            return float(row[col])
+        full_col = f"full_{col}"
+        if full_col in row:
+            return float(row[full_col])
+    return 0.0
 
 
 def _runner_time_bounds(runner) -> tuple[pd.Timestamp, pd.Timestamp]:

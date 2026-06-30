@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from typing import Any, Sequence
+
 import numpy as np
 import pandas as pd
 
-from .risk import compute_period_metrics, compute_trade_metrics, compute_trade_sharpe
+from .risk import compute_adrs_compatible_metrics, compute_period_metrics, compute_trade_metrics, compute_trade_sharpe
 
 
 def compute_equity_drawdown_stats(equity: np.ndarray) -> tuple[float, float]:
@@ -21,6 +23,33 @@ def compute_equity_drawdown_stats(equity: np.ndarray) -> tuple[float, float]:
     return total_return, max_dd
 
 
+def _adrs_pnl_inputs(
+    equity: np.ndarray,
+    timestamps: Sequence[Any] | pd.Series | pd.Index | None,
+    pnl: Sequence[float] | pd.Series | np.ndarray | None,
+) -> tuple[np.ndarray, list[Any]]:
+    ts_values = list(timestamps) if timestamps is not None else []
+
+    if pnl is not None:
+        pnl_values = np.asarray(list(pnl), dtype=float)
+        if ts_values and len(ts_values) == len(pnl_values):
+            return pnl_values, ts_values
+        if ts_values and len(ts_values) == len(equity) and len(pnl_values) == max(len(equity) - 1, 0):
+            return pnl_values, ts_values[1:]
+        if ts_values:
+            return pnl_values, ts_values[: len(pnl_values)]
+        return pnl_values, list(range(len(pnl_values)))
+
+    if len(equity) < 2:
+        return np.asarray([], dtype=float), []
+
+    returns = pd.Series(equity).pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+    returns = returns[np.isfinite(returns)]
+    if ts_values and len(ts_values) == len(equity):
+        return returns.to_numpy(dtype=float), [ts_values[int(i)] for i in returns.index]
+    return returns.to_numpy(dtype=float), list(range(len(returns)))
+
+
 def compute_metrics(
     equity: np.ndarray,
     trades: list[dict],
@@ -28,23 +57,25 @@ def compute_metrics(
     end_ts: pd.Timestamp,
     *,
     timestamps=None,
+    pnl: Sequence[float] | pd.Series | np.ndarray | None = None,
     periods_per_year: float | None = None,
     calendar: str = "crypto_365",
 ) -> dict:
-    total_return, max_dd = compute_equity_drawdown_stats(equity)
-    net_profit = float(equity[-1] - equity[0]) if len(equity) else 0.0
+    equity_arr = np.asarray(equity, dtype=float)
+    total_return, max_dd = compute_equity_drawdown_stats(equity_arr)
+    net_profit = float(equity_arr[-1] - equity_arr[0]) if len(equity_arr) else 0.0
     total_days = max((end_ts - start_ts).total_seconds() / 86400.0, 1.0)
 
     if timestamps is None:
-        if len(equity) > 1:
-            timestamps = pd.date_range(pd.Timestamp(start_ts), pd.Timestamp(end_ts), periods=len(equity))
-        elif len(equity) == 1:
+        if len(equity_arr) > 1:
+            timestamps = pd.date_range(pd.Timestamp(start_ts), pd.Timestamp(end_ts), periods=len(equity_arr))
+        elif len(equity_arr) == 1:
             timestamps = [pd.Timestamp(start_ts)]
         else:
             timestamps = []
 
     period_metrics = compute_period_metrics(
-        equity,
+        equity_arr,
         timestamps,
         periods_per_year=periods_per_year,
         calendar=calendar,
@@ -52,7 +83,15 @@ def compute_metrics(
     trade_metrics = compute_trade_metrics(
         trades,
         total_days=total_days,
-        equity_points=len(equity),
+        equity_points=len(equity_arr),
+    )
+    adrs_pnl, adrs_timestamps = _adrs_pnl_inputs(equity_arr, timestamps, pnl)
+    adrs_metrics = compute_adrs_compatible_metrics(
+        adrs_pnl,
+        adrs_timestamps,
+        equity=equity_arr if len(equity_arr) else None,
+        num_periods=365,
+        base_period="1D",
     )
 
     trade_sharpe = float(trade_metrics["trade_sharpe"])
@@ -108,6 +147,14 @@ def compute_metrics(
         "CVaR_95": round(float(period_metrics["CVaR_95"]), 3),
         "skew": round(float(period_metrics["skew"]), 3),
         "kurtosis": round(float(period_metrics["kurtosis"]), 3),
+        "adrs_sharpe": round(float(adrs_metrics["adrs_sharpe"]), 3),
+        "adrs_sortino": round(float(adrs_metrics["adrs_sortino"]), 3),
+        "adrs_annualized_return": round(float(adrs_metrics["adrs_annualized_return"]), 6),
+        "adrs_total_return": round(float(adrs_metrics["adrs_total_return"]), 6),
+        "adrs_cagr": round(float(adrs_metrics["adrs_cagr"]), 6),
+        "adrs_interval_seconds": round(float(adrs_metrics["adrs_interval_seconds"]), 6),
+        "adrs_period_multiplier": round(float(adrs_metrics["adrs_period_multiplier"]), 8),
+        "adrs_num_periods": int(adrs_metrics["adrs_num_periods"]),
     })
 
     return out

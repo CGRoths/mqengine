@@ -66,6 +66,120 @@ def infer_periods_per_year(timestamps: Sequence[Any] | pd.Series | pd.Index | No
     return max(seconds_per_year / max(median_seconds, EPS), 1.0)
 
 
+def _timedelta_seconds(value: str | pd.Timedelta) -> float:
+    try:
+        delta = value if isinstance(value, pd.Timedelta) else pd.Timedelta(value)
+    except Exception:
+        delta = pd.Timedelta("1D")
+    seconds = float(delta.total_seconds())
+    return seconds if seconds > EPS else 86400.0
+
+
+def _infer_adrs_interval_seconds(
+    timestamps: Sequence[Any] | pd.Series | pd.Index,
+    *,
+    base_period: str | pd.Timedelta,
+) -> float:
+    fallback = _timedelta_seconds(base_period)
+    values = list(timestamps)
+    if len(values) < 2:
+        return fallback
+
+    ts = pd.Series(pd.to_datetime(values, errors="coerce")).dropna()
+    if len(ts) < 2:
+        return fallback
+
+    diffs = ts.diff().dt.total_seconds().dropna()
+    positive_diffs = diffs[diffs > 0.0]
+    if positive_diffs.empty:
+        return fallback
+
+    median_seconds = float(positive_diffs.median())
+    if math.isfinite(median_seconds) and median_seconds > EPS:
+        return median_seconds
+
+    last_seconds = float(positive_diffs.iloc[-1])
+    if math.isfinite(last_seconds) and last_seconds > EPS:
+        return last_seconds
+    return fallback
+
+
+def compute_adrs_compatible_metrics(
+    pnl: Sequence[float] | pd.Series | np.ndarray,
+    timestamps: Sequence[Any] | pd.Series | pd.Index,
+    equity: Sequence[float] | pd.Series | np.ndarray | None = None,
+    *,
+    num_periods: int = 365,
+    base_period: str | pd.Timedelta = "1D",
+) -> dict[str, Any]:
+    """
+    Compute ADRS-compatible return metrics for MQEngine results.
+
+    ``pnl`` is interpreted as a period return series. Timestamp spacing uses the
+    median positive observed diff in series order, which is more robust to one
+    missed bar than ADRS' last-diff rule while preserving the same annualization
+    model. If no valid diff exists, ``base_period`` is used as the interval.
+    When ``equity`` is omitted, total return and CAGR are compounded from
+    ``pnl`` as a return series.
+    """
+    pnl_arr = np.asarray(list(pnl), dtype=float)
+    pnl_arr = pnl_arr[np.isfinite(pnl_arr)]
+
+    interval_seconds = _infer_adrs_interval_seconds(timestamps, base_period=base_period)
+    base_seconds = _timedelta_seconds(base_period)
+    period_multiplier = base_seconds / max(interval_seconds, EPS)
+    annualization = max(float(num_periods) * period_multiplier, EPS)
+
+    if pnl_arr.size == 0:
+        return {
+            "adrs_sharpe": 0.0,
+            "adrs_sortino": 0.0,
+            "adrs_annualized_return": 0.0,
+            "adrs_total_return": 0.0,
+            "adrs_cagr": 0.0,
+            "adrs_interval_seconds": _round(interval_seconds, 6),
+            "adrs_period_multiplier": _round(period_multiplier, 8),
+            "adrs_num_periods": int(num_periods),
+        }
+
+    mean_r = float(np.mean(pnl_arr))
+    std_r = float(np.std(pnl_arr, ddof=1)) if pnl_arr.size > 1 else 0.0
+    downside = np.where(pnl_arr < 0.0, pnl_arr, 0.0)
+    downside_dev = math.sqrt(float(np.mean(downside**2))) if downside.size else 0.0
+
+    adrs_sharpe = (mean_r / std_r) * math.sqrt(annualization) if std_r > EPS else 0.0
+    adrs_sortino = (mean_r / downside_dev) * math.sqrt(annualization) if downside_dev > EPS else 0.0
+    annualized_return = mean_r * annualization
+
+    if equity is not None:
+        equity_arr = np.asarray(list(equity), dtype=float)
+        equity_arr = equity_arr[np.isfinite(equity_arr)]
+        if equity_arr.size >= 2 and abs(float(equity_arr[0])) > EPS:
+            total_return = float(equity_arr[-1] / equity_arr[0] - 1.0)
+        else:
+            total_return = 0.0
+    else:
+        gross = float(np.prod(1.0 + pnl_arr))
+        total_return = gross - 1.0 if math.isfinite(gross) else float(np.sum(pnl_arr))
+
+    years = max(float(pnl_arr.size) / annualization, 1.0 / max(float(num_periods), 1.0))
+    if total_return <= -1.0:
+        cagr = -1.0
+    else:
+        cagr = math.exp(max(min(math.log1p(total_return) / max(years, EPS), 700.0), -700.0)) - 1.0
+
+    return {
+        "adrs_sharpe": _round(adrs_sharpe, 6),
+        "adrs_sortino": _round(adrs_sortino, 6),
+        "adrs_annualized_return": _round(annualized_return, 8),
+        "adrs_total_return": _round(total_return, 8),
+        "adrs_cagr": _round(cagr, 8),
+        "adrs_interval_seconds": _round(interval_seconds, 6),
+        "adrs_period_multiplier": _round(period_multiplier, 8),
+        "adrs_num_periods": int(num_periods),
+    }
+
+
 def compute_trade_sharpe(trade_account_returns: Iterable[float], trades_per_year: float) -> float:
     arr = np.asarray(list(trade_account_returns), dtype=float)
     arr = arr[np.isfinite(arr)]

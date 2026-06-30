@@ -6,6 +6,7 @@ from .portfolio import PortfolioBacktester
 from .research import ResearchProtocol, apply_research_protocol, research_protocol, run_walkforward
 from .sweep import SweepRunner
 from .transforms import norm, stand
+from .vectorized import run_vectorized_signal_backtest
 
 class BTDashFacade:
     cond = cond
@@ -57,6 +58,9 @@ class BTDashFacade:
             step=step,
             objective=objective,
         )
+
+    def vectorized_signal_backtest(self, price_df, signal_df, **kwargs):
+        return run_vectorized_signal_backtest(price_df, signal_df, **kwargs)
 
     def portfolio(self, *, prices, signals, weights=None, initial_capital: float = 10000.0, fee_pct: float = 0.0, calendar: str = "crypto_365", name: str = "portfolio") -> PortfolioBacktester:
         return PortfolioBacktester(

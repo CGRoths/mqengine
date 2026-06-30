@@ -11,12 +11,22 @@ from .result import SweepResult
 from .stability import compute_parameter_stability
 
 BuilderFn = Callable[..., None]
+OBJECTIVE_FALLBACK_ORDER = ("period_sharpe", "adrs_sharpe", "trade_sharpe", "sharpe", "return_pct")
 
 
 def _normalize_value(value: Any) -> Any:
     if isinstance(value, float):
         return float(value)
     return value
+
+
+def _select_objective_column(results_df: pd.DataFrame, objective: str) -> str:
+    ordered = [objective] + [col for col in OBJECTIVE_FALLBACK_ORDER if col != objective]
+    for col in ordered:
+        if col in results_df.columns:
+            return col
+    numeric_cols = list(results_df.select_dtypes("number").columns)
+    return numeric_cols[-1] if numeric_cols else objective
 
 
 class SweepRunner:
@@ -133,24 +143,38 @@ class SweepRunner:
             })
 
         results_df = pd.DataFrame(rows)
-        stability = compute_parameter_stability(results_df, param_names, objective=objective)
+        sort_col = _select_objective_column(results_df, objective) if not results_df.empty else objective
+        stability = compute_parameter_stability(results_df, param_names, objective=sort_col)
+        self._meta.update({
+            "research_protocol": protocol.to_dict(),
+            "objective": objective,
+            "objective_sort_key": sort_col,
+            "stability": stability,
+        })
         if not results_df.empty:
-            sort_col = objective if objective in results_df.columns else "sharpe"
-            results_df = results_df.sort_values([sort_col, "return_pct"], ascending=[False, False]).reset_index(drop=True)
+            sort_values = pd.to_numeric(results_df[sort_col], errors="coerce") if sort_col in results_df.columns else pd.Series(0.0, index=results_df.index)
+            results_df = results_df.assign(_objective_sort=sort_values.fillna(float("-inf")))
+            results_df = results_df.sort_values(["_objective_sort", "return_pct"], ascending=[False, False]).drop(columns=["_objective_sort"]).reset_index(drop=True)
             best = results_df.iloc[0].to_dict()
             self._meta.update({
                 "total_strategies": int(len(results_df)),
-                "research_protocol": protocol.to_dict(),
-                "objective": objective,
-                "stability": stability,
                 "best_strategy": {
                     "strategy_id": best["strategy_id"],
                     "objective": best.get(sort_col),
+                    "objective_name": objective,
+                    "objective_sort_key": sort_col,
                     "sharpe": best.get("sharpe"),
                     "period_sharpe": best.get("period_sharpe"),
+                    "trade_sharpe": best.get("trade_sharpe"),
+                    "adrs_sharpe": best.get("adrs_sharpe"),
                     "return_pct": best.get("return_pct"),
                     "max_drawdown": best.get("max_drawdown"),
                     "num_trades": best.get("num_trades"),
+                    "out_sample_period_sharpe": best.get("out_sample_period_sharpe"),
+                    "out_sample_trade_sharpe": best.get("out_sample_trade_sharpe"),
+                    "out_sample_adrs_sharpe": best.get("out_sample_adrs_sharpe"),
+                    "validation_oos_pass": best.get("validation_oos_pass"),
+                    "validation_warnings": best.get("validation_warnings"),
                 },
             })
         return SweepResult(
