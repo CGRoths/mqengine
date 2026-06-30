@@ -7,3 +7,153 @@ Description-Content-Type: text/markdown
 Requires-Dist: flask>=3.0.0
 Requires-Dist: numpy>=1.24.0
 Requires-Dist: pandas>=2.0.0
+
+﻿# mqengine
+
+`mqengine` is the MAMAKQUANT research engine for backtesting, signal alignment, sweep analytics, portfolio simulation, risk metrics, and future OMS performance analytics. It does not collect market data and does not execute orders: `mqnode` owns data acquisition, and `mqbot` owns live execution.
+
+## Legacy Quickstart
+
+```python
+from mqengine import btdash
+
+runner = btdash.new(
+    price=close,
+    signal=signal,
+    benchmark=close,
+    open_=open_,
+    high=high,
+    low=low,
+    name="BTC NVT Strategy",
+    initial_capital=100.0,
+)
+
+runner.norm("zscore", window=30)
+runner.entry(
+    long=btdash.cond.cross_above(1.0),
+    short=btdash.cond.cross_below(-1.0),
+)
+runner.exit(
+    long=btdash.cond.cross_below(0.0),
+    short=btdash.cond.cross_above(0.0),
+)
+runner.risk(position_size_pct=0.10, take_profit_pct=10, stop_loss_pct=-10, fee_pct=0.00055)
+
+result = runner.run()
+app = result.to_flask_app()
+```
+
+`metrics["sharpe"]` remains available for compatibility and is an alias for `trade_sharpe`.
+
+## V2 Research Protocol
+
+```python
+protocol = btdash.research_protocol(
+    start="2020-01-01",
+    end="2025-12-31",
+    in_sample=("2020-01-01", "2023-12-31"),
+    out_sample=("2024-01-01", "2025-12-31"),
+    calendar="crypto_365",
+)
+
+research_result = runner.run_research(protocol)
+print(research_result.metrics["full"])
+print(research_result.metrics["in_sample"])
+print(research_result.metrics["out_sample"])
+print(research_result.validation)
+```
+
+Research results include full-period, in-sample, and out-of-sample metrics plus validation warnings for weak OOS trade count, Sharpe decay, return collapse, and drawdown expansion.
+
+## Sweep Research
+
+```python
+sweep_result = sweep.run_research(protocol=protocol, objective="period_sharpe")
+app = sweep_result.to_flask_app()
+```
+
+Sweep rows include trade Sharpe, period Sharpe, Sortino, Calmar, drawdown metrics, IS/OOS metrics, and stability metadata.
+
+## Trade Sharpe vs Period Sharpe
+
+- `trade_sharpe`: computed from closed-trade account returns.
+- `period_sharpe`: computed from equity curve period returns.
+- `sharpe`: legacy alias for `trade_sharpe`.
+
+Use `period_sharpe` for portfolio/risk comparisons and `trade_sharpe` when analyzing the closed-trade distribution.
+
+## MQNode SQL Alignment
+
+```python
+from mqengine import fetch_sql_ohlc, fetch_sql_signal, align_signal_to_bars
+
+price_df = fetch_sql_ohlc(engine, table_name="btcusd_1h", open_time_col="open_time", close_time_col="close_time")
+signal_df = fetch_sql_signal(engine, table_name="nvt_4h", ts_col="bucket_start_utc", value_col="nvt_raw", start_ts=start, end_ts=end)
+
+signal_df = signal_df.rename(columns={"ts": "event_ts"})
+signal_df["available_ts"] = signal_df["event_ts"] + pd.Timedelta("5m")
+
+aligned = align_signal_to_bars(
+    price_df,
+    signal_df,
+    execution_ts_col="ts",
+    signal_event_ts_col="event_ts",
+    signal_available_ts_col="available_ts",
+    signal_value_col="signal_value",
+    output_col="signal_raw",
+    tolerance="24h",
+    min_lag="0s",
+)
+```
+
+The aligned frame includes audit columns: `signal_event_ts`, `signal_available_ts`, `signal_age_seconds`, `is_stale_signal`, `alignment_method`, and `lookahead_safe`.
+
+## Walk-Forward
+
+```python
+wf = btdash.walkforward(
+    sweep,
+    train_window="730D",
+    test_window="180D",
+    step="180D",
+    objective="period_sharpe",
+)
+
+print(wf.to_dict()["combined_oos_metrics"])
+```
+
+Each fold optimizes on a half-open train window and tests on the following OOS window.
+
+## Portfolio Mode
+
+```python
+portfolio = btdash.portfolio(
+    prices=prices_df,      # ts, symbol, open, high, low, close, volume
+    signals=signals_df,    # ts, strategy_id, symbol, target_weight, signal_value
+    weights=weights_df,    # strategy_id, weight
+    initial_capital=10000,
+    calendar="crypto_365",
+)
+
+portfolio_result = portfolio.run()
+print(portfolio_result.metrics)
+print(portfolio_result.attribution)
+```
+
+Portfolio mode is separate from the single-strategy engine and reports equity, cash, positions, exposure, turnover, drift, portfolio risk metrics, and symbol attribution.
+
+## OMS Analytics
+
+```python
+from mqengine import compute_oms_metrics
+
+metrics = compute_oms_metrics(
+    order_events=orders_df,
+    fill_events=fills_df,
+    position_snapshots=positions_df,
+    equity_snapshots=equity_df,
+    target_position_snapshots=targets_df,
+)
+```
+
+OMS analytics are offline monitoring metrics only: fill ratio, cancel/reject ratio, slippage, shortfall, latency, fee drag, position drift, live drawdown, exposure, and venue execution quality.
